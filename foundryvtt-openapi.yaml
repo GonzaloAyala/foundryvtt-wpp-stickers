@@ -1,0 +1,1048 @@
+openapi: 3.1.0
+info:
+  title: Foundry Virtual Tabletop API (Unofficial/Reconstructed)
+  description: |
+    **Unofficial** OpenAPI specification for Foundry Virtual Tabletop v14,
+    reverse-engineered from the public client-side API documentation at
+    https://foundryvtt.com/api/.
+
+    ## Important Notes
+
+    Foundry VTT is **NOT a traditional REST API server**. Most data operations
+    (Document CRUD for Actors, Items, ChatMessages, etc.) are performed over
+    **WebSocket** connections using `SocketInterface.dispatch`, not HTTP REST
+    endpoints.
+
+    This specification documents:
+    1. **HTTP Endpoints** - The actual HTTP routes Foundry exposes (file operations, auth, setup).
+    2. **Socket-Based Document Operations** - Modeled as pseudo-REST paths for reference,
+       but these actually use WebSocket `game.socket` under the hood.
+
+    ## Architecture
+    - Server: Node.js (Express-based HTTP + socket.io WebSocket)
+    - Client: JavaScript SPA served at the root
+    - Auth: Cookie-based session after joining a game world
+    - Files: Served from `{userData}/Data/` directory
+    - Modules: Installed in `{userData}/Data/modules/{moduleId}/`
+
+    ## Module Development
+    Foundry modules interact via the client-side JavaScript API, hooks, and socket events.
+    There is no official server-side REST API for modules to call externally.
+
+    ## v14 Breaking Changes (vs v11-v13)
+    - **ApplicationV2**: All sidebar tabs (ChatLog, ActorDirectory, etc.) now use
+      `ApplicationV2` + `HandlebarsApplication` mixin instead of the legacy `Application` class.
+      The `html` parameter in render hooks is now a plain `HTMLElement`, not jQuery.
+    - **FormApplication deprecated**: Use `ApplicationV2` with `HandlebarsApplication` mixin
+      and form configuration instead.
+    - **Dialog deprecated**: Use `foundry.applications.api.DialogV2` instead of `Dialog`.
+    - **ProseMirror chat input**: The chat input is now a ProseMirror rich-text editor
+      instead of a plain `<textarea>`. The DOM structure inside the chat sidebar changed
+      entirely (`#chat-form` and `#chat-controls` no longer exist).
+    - **MeasuredTemplate removed**: Replaced by Region-based templates attached to Scenes.
+    - **Hook signature changes**: Render hooks for ApplicationV2 apps pass `(app, HTMLElement)`
+      instead of `(app, jQuery, data)`. The third `data` parameter is no longer provided.
+    - **renderChatMessage → renderChatMessageHTML**: The hook for customizing chat message
+      rendering is now `renderChatMessageHTML(message, html)` where `html` is `HTMLElement`.
+    - **Font Awesome 7.2**: Updated from FA 6.x.
+  version: "14.360"
+  contact:
+    name: Foundry VTT Community
+    url: https://foundryvtt.com/community/
+  license:
+    name: Proprietary
+    url: https://foundryvtt.com/article/license/
+
+servers:
+  - url: http://localhost:30000
+    description: Default local Foundry VTT instance
+
+tags:
+  - name: Authentication
+    description: Session and authentication endpoints
+  - name: Files
+    description: File browsing, uploading, and directory management (actual HTTP endpoints)
+  - name: Setup
+    description: Server setup and configuration
+  - name: Documents-ChatMessage
+    description: |
+      ChatMessage document operations. In practice these go over WebSocket via
+      `ChatMessage.create()`, `ChatMessage.update()`, `ChatMessage.delete()`.
+      Modeled here as REST for reference.
+  - name: Documents-Generic
+    description: |
+      Generic document CRUD patterns. All primary document types (Actor, Item,
+      Scene, JournalEntry, Macro, etc.) follow the same pattern via WebSocket.
+  - name: Modules
+    description: Module and package management
+
+paths:
+  # ============================================================
+  # ACTUAL HTTP ENDPOINTS
+  # ============================================================
+
+  /join:
+    get:
+      tags: [Authentication]
+      summary: Join game page
+      description: Renders the join/login page for a running world.
+      responses:
+        "200":
+          description: HTML join page
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      tags: [Authentication]
+      summary: Authenticate and join a game session
+      description: |
+        Submit credentials to join a running game world. On success, sets a
+        session cookie and redirects to `/game`.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                userid:
+                  type: string
+                  description: The User document ID to join as
+                password:
+                  type: string
+                  description: The password for the selected user (if required)
+              required:
+                - userid
+      responses:
+        "302":
+          description: Redirect to /game on success
+        "401":
+          description: Invalid credentials
+
+  /auth:
+    post:
+      tags: [Authentication]
+      summary: Authenticate to the setup screen
+      description: Provide the admin password to access the Foundry VTT setup screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adminPassword:
+                  type: string
+                  description: The administrator password
+              required:
+                - adminPassword
+      responses:
+        "200":
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [success, failed]
+        "401":
+          description: Invalid admin password
+
+  /game:
+    get:
+      tags: [Authentication]
+      summary: Main game client
+      description: |
+        The main game page. Requires an active session (cookie from /join).
+        Returns the full Foundry VTT client-side application.
+      responses:
+        "200":
+          description: HTML game client
+          content:
+            text/html:
+              schema:
+                type: string
+        "302":
+          description: Redirect to /join if not authenticated
+
+  # ---- File Operations (Real HTTP Endpoints) ----
+
+  /api/files/browse:
+    post:
+      tags: [Files]
+      summary: Browse files in a directory
+      description: |
+        Browse the contents of a directory within a file source.
+        This is the server-side handler for `FilePicker.browse()`.
+
+        Sources:
+        - `data` - The user data directory (`{userData}/Data/`)
+        - `public` - The Foundry VTT public assets directory
+        - `s3` - An S3-compatible storage bucket (if configured)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [browseFiles]
+                  default: browseFiles
+                storage:
+                  type: string
+                  enum: [data, public, s3]
+                  description: The storage source to browse
+                target:
+                  type: string
+                  description: |
+                    The target directory path relative to the source root.
+                    Example: "modules/my-module/stickers"
+                extensions:
+                  type: array
+                  items:
+                    type: string
+                  description: File extensions to filter (e.g. [".png", ".webp", ".gif"])
+                wildcard:
+                  type: boolean
+                  description: Whether the target represents a wildcard path
+                bucket:
+                  type: string
+                  description: S3 bucket name (only for s3 source)
+              required:
+                - action
+                - storage
+                - target
+      responses:
+        "200":
+          description: Directory listing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileBrowseResult"
+        "403":
+          description: Insufficient permissions
+
+  /api/files/mkdir:
+    post:
+      tags: [Files]
+      summary: Create a directory
+      description: |
+        Create a subdirectory within a file source.
+        Server-side handler for `FilePicker.createDirectory()`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [createDirectory]
+                  default: createDirectory
+                storage:
+                  type: string
+                  enum: [data, public, s3]
+                target:
+                  type: string
+                  description: The directory path to create
+                bucket:
+                  type: string
+                  description: S3 bucket name (only for s3 source)
+              required:
+                - action
+                - storage
+                - target
+      responses:
+        "200":
+          description: Directory created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "403":
+          description: Insufficient permissions
+        "409":
+          description: Directory already exists
+
+  /upload:
+    post:
+      tags: [Files]
+      summary: Upload a file
+      description: |
+        Upload a file to the Foundry VTT server. This is the endpoint used by
+        `FilePicker.upload()` and `FilePicker.uploadPersistent()`.
+
+        The upload URL is accessible via `FilePicker.uploadURL`.
+
+        For module persistent storage, files are uploaded to:
+        `{userData}/Data/modules/{moduleId}/storage/{path}`
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                source:
+                  type: string
+                  enum: [data, public, s3]
+                  description: The storage source
+                target:
+                  type: string
+                  description: |
+                    The destination directory path.
+                    For persistent module storage: "modules/{moduleId}/storage/{subpath}"
+                upload:
+                  type: string
+                  format: binary
+                  description: The file to upload
+                bucket:
+                  type: string
+                  description: S3 bucket name (only for s3 source)
+              required:
+                - source
+                - target
+                - upload
+      responses:
+        "200":
+          description: File uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [success]
+                  path:
+                    type: string
+                    description: The path to the uploaded file
+                  message:
+                    type: string
+        "400":
+          description: Invalid upload request
+        "403":
+          description: Insufficient permissions to upload
+
+  /api/files/configure:
+    post:
+      tags: [Files]
+      summary: Configure file path metadata
+      description: |
+        Configure metadata settings for a file system path.
+        Server-side handler for `FilePicker.configurePath()`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [configurePath]
+                storage:
+                  type: string
+                  enum: [data, public, s3]
+                target:
+                  type: string
+                  description: The target path
+              required:
+                - action
+                - storage
+                - target
+      responses:
+        "200":
+          description: Path configuration result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ---- Setup Endpoints ----
+
+  /setup:
+    get:
+      tags: [Setup]
+      summary: Setup screen
+      description: The Foundry VTT setup/configuration screen. Requires admin authentication.
+      responses:
+        "200":
+          description: HTML setup page
+          content:
+            text/html:
+              schema:
+                type: string
+        "302":
+          description: Redirect to auth if not authenticated
+
+  /api/setup:
+    post:
+      tags: [Setup]
+      summary: Setup API operations
+      description: |
+        Perform setup operations like installing/uninstalling packages,
+        creating/launching worlds, etc.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  description: The setup action to perform
+                  enum:
+                    - installPackage
+                    - uninstallPackage
+                    - createWorld
+                    - launchWorld
+                    - shutDown
+              required:
+                - action
+      responses:
+        "200":
+          description: Action result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ---- Static Asset Serving ----
+
+  /modules/{moduleId}/{filePath}:
+    get:
+      tags: [Files]
+      summary: Serve a module's static file
+      description: |
+        Access static files bundled with a module package.
+        Files are served from `{userData}/Data/modules/{moduleId}/`.
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The module's package ID
+        - name: filePath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Path to the file within the module directory
+      responses:
+        "200":
+          description: The requested file
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: object
+            text/*:
+              schema:
+                type: string
+        "404":
+          description: File not found
+
+  # ============================================================
+  # WEBSOCKET-BASED DOCUMENT OPERATIONS (modeled as REST for reference)
+  # These do NOT use HTTP -- they use socket.io WebSocket events.
+  # Included here for completeness to aid module development.
+  # ============================================================
+
+  /socket/ChatMessage:
+    post:
+      tags: [Documents-ChatMessage]
+      summary: Create ChatMessage (WebSocket)
+      description: |
+        **This is NOT an HTTP endpoint.** ChatMessages are created via:
+        ```js
+        ChatMessage.create({
+          content: "<img src='path/to/sticker.webp' class='sticker' />",
+          speaker: ChatMessage.getSpeaker()
+        });
+        ```
+
+        ### v14 Changes
+        - `CONST.CHAT_MESSAGE_TYPES` is removed. ChatMessage now supports document
+          subtypes via the `type` string field and `system` data (like Actors/Items).
+        - The `type` field is a free-form string for system/module subtypes, not an enum.
+        - `ChatMessage#author` returns the User document directly (not just an ID).
+          The stored field is still the user ID.
+        - Chat messages are rendered via `ChatMessage#renderHTML()` returning an
+          `HTMLElement`. The deprecated `ChatMessage#getHTML()` (jQuery) still works
+          but will be removed.
+
+        ### ChatMessage Schema Fields
+        | Field | Type | Description |
+        |-------|------|-------------|
+        | `_id` | DocumentIdField | Unique document ID |
+        | `author` | DocumentAuthorField | ID of the User who created the message |
+        | `content` | HTMLField | The HTML content of the message |
+        | `flavor` | HTMLField | Flavor text / header for the message |
+        | `speaker` | Object | Speaker identification data |
+        | `whisper` | Array<string> | User IDs who can see this whispered message |
+        | `blind` | Boolean | Is this a blind message (GM only sees content)? |
+        | `emote` | Boolean | Is this an emote-style message? |
+        | `rolls` | Array | Serialized Roll data |
+        | `sound` | FilePathField | Path to an audio file to play |
+        | `flags` | Object | Arbitrary key-value flag data (namespaced by module) |
+        | `type` | String | Message subtype |
+        | `system` | Object | System-specific data |
+        | `_stats` | DocumentStatsField | Document statistics |
+
+        ### Speaker Data Structure
+        ```js
+        {
+          scene: string | null,   // Scene ID
+          actor: string | null,   // Actor ID
+          token: string | null,   // Token ID
+          alias: string           // Display name
+        }
+        ```
+
+        ### For Sticker Module Usage
+        ```js
+        // Send a sticker as a chat message
+        ChatMessage.create({
+          content: `<div class="wpp-sticker"><img src="modules/wpp-stickers/storage/pack1/sticker.webp" /></div>`,
+          speaker: ChatMessage.getSpeaker(),
+          flags: {
+            "wpp-stickers": {
+              isSticker: true,
+              packId: "pack1",
+              stickerId: "sticker-001"
+            }
+          }
+        });
+        ```
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageData"
+      responses:
+        "200":
+          description: ChatMessage created (via socket callback)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessageData"
+
+  /socket/Document/{documentType}:
+    post:
+      tags: [Documents-Generic]
+      summary: Create Document (WebSocket)
+      description: |
+        **This is NOT an HTTP endpoint.** All primary document types follow the
+        same CRUD pattern via WebSocket:
+
+        ```js
+        // Create
+        const doc = await DocumentClass.create(data);
+        // Read
+        const doc = game.collections.get(collectionName).get(id);
+        // Update
+        await doc.update({key: value});
+        // Delete
+        await doc.delete();
+        ```
+
+        ### Primary Document Types
+        | Type | Collection | Description |
+        |------|-----------|-------------|
+        | Actor | `game.actors` | Player/NPC characters |
+        | ChatMessage | `game.messages` | Chat messages |
+        | Combat | `game.combats` | Combat encounters |
+        | Item | `game.items` | Items/abilities |
+        | JournalEntry | `game.journal` | Journal entries |
+        | Macro | `game.macros` | Executable macros |
+        | Playlist | `game.playlists` | Audio playlists |
+        | RollTable | `game.tables` | Random tables |
+        | Scene | `game.scenes` | Map scenes |
+        | Setting | `game.settings` | World settings |
+        | User | `game.users` | Connected users |
+        | Cards | `game.cards` | Card stacks |
+        | Folder | `game.folders` | Organizational folders |
+        | FogExploration | - | Fog of war data |
+      parameters:
+        - name: documentType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - Actor
+              - Adventure
+              - Cards
+              - ChatMessage
+              - Combat
+              - FogExploration
+              - Folder
+              - Item
+              - JournalEntry
+              - Macro
+              - Playlist
+              - RollTable
+              - Scene
+              - Setting
+              - User
+          description: |
+            Note: `MeasuredTemplate` was removed in v14. Use Region-based templates instead.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Document data matching the schema for the document type
+      responses:
+        "200":
+          description: Document operation result (via socket callback)
+
+    put:
+      tags: [Documents-Generic]
+      summary: Update Document (WebSocket)
+      description: |
+        **This is NOT an HTTP endpoint.** Update via:
+        ```js
+        await doc.update({key: newValue});
+        // or batch:
+        await DocumentClass.updateDocuments([{_id: "...", key: newValue}]);
+        ```
+      parameters:
+        - name: documentType
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                _id:
+                  type: string
+                  description: The document ID to update
+              required:
+                - _id
+      responses:
+        "200":
+          description: Document updated
+
+    delete:
+      tags: [Documents-Generic]
+      summary: Delete Document (WebSocket)
+      description: |
+        **This is NOT an HTTP endpoint.** Delete via:
+        ```js
+        await doc.delete();
+        // or batch:
+        await DocumentClass.deleteDocuments([id1, id2]);
+        ```
+      parameters:
+        - name: documentType
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Document deleted
+
+  # ---- Module Socket Events ----
+
+  /socket/module/{moduleId}:
+    post:
+      tags: [Modules]
+      summary: Custom module socket event (WebSocket)
+      description: |
+        **This is NOT an HTTP endpoint.** Modules can register custom socket
+        events for inter-client communication:
+
+        ```js
+        // Listen for socket events (register in "ready" hook)
+        Hooks.once("ready", () => {
+          game.socket.on("module.wpp-stickers", (data) => {
+            if (data.action === "showSticker") {
+              showStickerOnCanvas(data.stickerId, data.position);
+            }
+          });
+        });
+
+        // Emit to all other clients
+        game.socket.emit("module.wpp-stickers", {
+          action: "showSticker",
+          stickerId: "sticker-001",
+          position: { x: 500, y: 300 }
+        });
+        ```
+
+        **Note:** Requires `"socket": true` in `module.json`.
+        The socket channel name is always `"module.{moduleId}"`.
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The module package ID (e.g. "wpp-stickers")
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Arbitrary data payload for the socket event
+      responses:
+        "200":
+          description: Event dispatched to connected clients
+
+components:
+  schemas:
+    FileBrowseResult:
+      type: object
+      properties:
+        target:
+          type: string
+          description: The browsed directory path
+        private:
+          type: boolean
+          description: Whether the directory is private
+        dirs:
+          type: array
+          items:
+            type: string
+          description: List of subdirectory paths
+        files:
+          type: array
+          items:
+            type: string
+          description: List of file paths
+        extensions:
+          type: array
+          items:
+            type: string
+          description: Applied file extension filters
+
+    ChatMessageData:
+      type: object
+      properties:
+        _id:
+          type: string
+          description: Unique document ID (auto-generated on create)
+        author:
+          type: string
+          description: The User ID of the message author
+        content:
+          type: string
+          description: HTML content of the message
+        flavor:
+          type: string
+          description: Flavor text displayed as a header
+        speaker:
+          $ref: "#/components/schemas/ChatSpeakerData"
+        whisper:
+          type: array
+          items:
+            type: string
+          description: Array of User IDs who can see the whispered message
+        blind:
+          type: boolean
+          description: Whether the message content is hidden from non-GM users
+          default: false
+        emote:
+          type: boolean
+          description: Whether this is an emote-style message
+          default: false
+        rolls:
+          type: array
+          items:
+            type: string
+          description: Serialized Roll JSON strings
+        sound:
+          type: string
+          description: Path to an audio file to play with this message
+        flags:
+          type: object
+          description: |
+            Arbitrary key-value data namespaced by package ID.
+            Example: `{ "wpp-stickers": { "isSticker": true } }`
+          additionalProperties:
+            type: object
+        type:
+          type: string
+          description: The ChatMessage subtype
+        system:
+          type: object
+          description: System-specific data
+        _stats:
+          $ref: "#/components/schemas/DocumentStats"
+
+    ChatSpeakerData:
+      type: object
+      description: Identifies who is speaking in a chat message
+      properties:
+        scene:
+          type: string
+          nullable: true
+          description: The Scene ID where the speaker is
+        actor:
+          type: string
+          nullable: true
+          description: The Actor ID of the speaker
+        token:
+          type: string
+          nullable: true
+          description: The Token ID of the speaker
+        alias:
+          type: string
+          description: The display name alias of the speaker
+
+    DocumentStats:
+      type: object
+      properties:
+        compendiumSource:
+          type: string
+          nullable: true
+        duplicateSource:
+          type: string
+          nullable: true
+        coreVersion:
+          type: string
+        systemId:
+          type: string
+        systemVersion:
+          type: string
+        createdTime:
+          type: number
+        modifiedTime:
+          type: number
+        lastModifiedBy:
+          type: string
+
+    ModuleManifest:
+      type: object
+      description: |
+        The `module.json` manifest file for a Foundry VTT module.
+        Placed at the root of the module directory.
+      required:
+        - id
+        - title
+        - version
+        - compatibility
+      properties:
+        id:
+          type: string
+          description: Unique package identifier (lowercase, hyphens allowed)
+          example: wpp-stickers
+        title:
+          type: string
+          description: Human-readable module title
+          example: WhatsApp Stickers for Foundry VTT
+        description:
+          type: string
+          description: Module description
+        version:
+          type: string
+          description: Semantic version string
+          example: "1.0.0"
+        compatibility:
+          type: object
+          properties:
+            minimum:
+              type: string
+              description: Minimum Foundry VTT version
+              example: "12"
+            verified:
+              type: string
+              description: Verified compatible Foundry VTT version
+              example: "14"
+            maximum:
+              type: string
+              description: Maximum Foundry VTT version
+        authors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              url:
+                type: string
+              email:
+                type: string
+        scripts:
+          type: array
+          items:
+            type: string
+          description: JavaScript files to load (legacy, prefer esmodules)
+        esmodules:
+          type: array
+          items:
+            type: string
+          description: ES module JavaScript files to load
+          example: ["scripts/wpp-stickers.mjs"]
+        styles:
+          type: array
+          items:
+            type: string
+          description: CSS stylesheets to load
+          example: ["styles/wpp-stickers.css"]
+        languages:
+          type: array
+          items:
+            type: object
+            properties:
+              lang:
+                type: string
+              name:
+                type: string
+              path:
+                type: string
+        url:
+          type: string
+          description: Project URL
+        manifest:
+          type: string
+          description: URL to the latest module.json manifest
+        download:
+          type: string
+          description: URL to download the module zip
+        socket:
+          type: boolean
+          description: Whether the module uses socket communication
+          default: false
+        persistentStorage:
+          type: boolean
+          description: |
+            Whether the module uses persistent storage.
+            Enables `FilePicker.uploadPersistent()` for this module.
+            Files stored in `{userData}/Data/modules/{id}/storage/`
+          default: false
+
+    # ---- Hooks Reference ----
+    HooksReference:
+      type: object
+      description: |
+        Key hooks available for module developers. Register via:
+        ```js
+        Hooks.on("hookName", (arg1, arg2) => { ... });
+        Hooks.once("hookName", (arg1, arg2) => { ... });
+        ```
+
+        ### Lifecycle Hooks
+        | Hook | When | Args |
+        |------|------|------|
+        | `init` | Module initialization | none |
+        | `ready` | Game fully loaded | `game` |
+        | `setup` | After init, before ready | none |
+
+        ### Document Hooks
+        | Hook | When | Args |
+        |------|------|------|
+        | `createChatMessage` | After ChatMessage created | `(document, options, userId)` |
+        | `updateChatMessage` | After ChatMessage updated | `(document, change, options, userId)` |
+        | `deleteChatMessage` | After ChatMessage deleted | `(document, options, userId)` |
+        | `preCreateChatMessage` | Before ChatMessage created | `(document, data, options, userId)` |
+        | `renderChatMessageHTML` | When message HTML is rendered (v14) | `(message, html: HTMLElement)` |
+
+        ### UI Hooks (v14 — ApplicationV2)
+        In v14, all sidebar tabs use ApplicationV2. The `html` parameter in render
+        hooks is now a plain `HTMLElement` (not jQuery), and the third `data`
+        parameter is no longer provided.
+
+        | Hook | When | Args (v14) | Args (v11-v13 legacy) |
+        |------|------|------------|----------------------|
+        | `renderChatLog` | Chat sidebar rendered | `(app, html: HTMLElement)` | `(app, jQuery, data)` |
+        | `renderSidebarTab` | Any sidebar tab rendered | `(app, html: HTMLElement)` | `(app, jQuery, data)` |
+        | `getSceneControlButtons` | Scene controls built | `(controls)` | `(controls)` |
+        | `canvasReady` | Canvas is ready | `(canvas)` | `(canvas)` |
+
+        ### v14 Chat DOM Structure
+        The chat sidebar HTML structure changed significantly in v14:
+        - The old `#chat-form` and `#chat-controls` elements no longer exist.
+        - The chat input is now a ProseMirror rich-text editor.
+        - The input area is in `[data-application-part="input"]`.
+        - The formatting toolbar is a `<menu>` element within the input part.
+        - To inject UI into the chat, find elements via `[data-application-part]`
+          selectors instead of legacy IDs.
+
+        ### v14 ApplicationV2 Render Hooks
+        ApplicationV2 applications fire hooks named `render{ClassName}` with the
+        signature `(app, html: HTMLElement)`. To support both v14 and older
+        versions, handle both HTMLElement and jQuery:
+        ```js
+        Hooks.on("renderChatLog", (app, html) => {
+          const root = (html instanceof HTMLElement) ? html : (html[0] ?? html);
+          // ... work with root
+        });
+        ```
+
+    # ---- Settings Reference ----
+    SettingsReference:
+      type: object
+      description: |
+        Module settings API for persisting configuration:
+        ```js
+        // Register a setting
+        game.settings.register("wpp-stickers", "stickerPacks", {
+          name: "Sticker Packs",
+          hint: "Configured sticker pack data",
+          scope: "world",      // "world" (GM only) or "client" (per-user)
+          config: false,        // Show in settings menu?
+          type: Object,
+          default: {}
+        });
+
+        // Get a setting value
+        const packs = game.settings.get("wpp-stickers", "stickerPacks");
+
+        // Set a setting value
+        await game.settings.set("wpp-stickers", "stickerPacks", newValue);
+        ```
+
+        ### v14 Settings Menu Registration
+        In v14, `game.settings.registerMenu()` should reference an `ApplicationV2`
+        subclass instead of the deprecated `FormApplication`. The `type` property
+        accepts any class with a `render()` method:
+        ```js
+        game.settings.registerMenu(moduleId, "myMenu", {
+          name: "My Settings Menu",
+          label: "Open",
+          type: MyApplicationV2Subclass,  // extends ApplicationV2
+          restricted: true
+        });
+        ```
+        Note: `FormApplication` still works in v14 (deprecated but functional).
+
+    # ---- FilePicker Client API Reference ----
+    FilePickerAPI:
+      type: object
+      description: |
+        ### Static Methods (Client-Side)
+
+        **`FilePicker.browse(source, target, options)`**
+        Browse files for a directory. Returns `{target, dirs, files, extensions}`.
+
+        **`FilePicker.upload(source, path, file, body, options)`**
+        Upload a file. Dispatches POST to `/upload`.
+
+        **`FilePicker.uploadPersistent(packageId, path, file, body, options)`**
+        Upload to module persistent storage at `modules/{packageId}/storage/{path}`.
+        Requires `"persistentStorage": true` in `module.json`.
+
+        **`FilePicker.createDirectory(source, target, options)`**
+        Create a subdirectory.

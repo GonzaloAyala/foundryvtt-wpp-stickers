@@ -1,0 +1,46 @@
+<div class="wpp-stickers pack-manager">
+  <p class="notes">{{localize "WPP_STICKERS.PackManager.Description"}}</p>
+
+  <div class="wpp-pack-controls">
+    <button type="button" data-action="uploadPack">
+      <i class="fas fa-plus"></i> {{localize "WPP_STICKERS.PackManager.NewPack"}}
+    </button>
+  </div>
+
+  {{#if packs.length}}
+    {{#each packs}}
+    <section class="wpp-pack-section" data-pack-id="{{this.id}}">
+      <header class="wpp-pack-header">
+        <button type="button" data-action="togglePack" title="{{localize 'WPP_STICKERS.PackManager.TogglePack'}}">
+          <i class="fas fa-caret-down"></i>
+        </button>
+        <h3>{{this.name}}</h3>
+        <span class="wpp-pack-count">({{this.stickers.length}} stickers)</span>
+        <div class="wpp-pack-actions">
+          <button type="button" data-action="uploadStickers" title="{{localize 'WPP_STICKERS.PackManager.AddStickers'}}">
+            <i class="fas fa-upload"></i>
+          </button>
+          <button type="button" data-action="deletePack" title="{{localize 'WPP_STICKERS.PackManager.DeletePack'}}">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      </header>
+      <div class="wpp-pack-stickers">
+        {{#each this.stickers}}
+        <div class="wpp-pack-sticker-item" data-sticker-id="{{this.id}}">
+          <img src="{{this.path}}" alt="{{this.name}}" title="{{this.name}}" loading="lazy" />
+          <span class="wpp-sticker-label">{{this.name}}</span>
+          <button type="button" data-action="deleteSticker" title="{{localize 'WPP_STICKERS.PackManager.DeleteSticker'}}">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        {{else}}
+        <p class="wpp-empty-pack">{{localize "WPP_STICKERS.PackManager.EmptyPack"}}</p>
+        {{/each}}
+      </div>
+    </section>
+    {{/each}}
+  {{else}}
+    <p class="wpp-no-packs">{{localize "WPP_STICKERS.PackManager.NoPacks"}}</p>
+  {{/if}}
+</div>

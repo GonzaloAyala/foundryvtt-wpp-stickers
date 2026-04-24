@@ -1,0 +1,50 @@
+{
+  "WPP_STICKERS": {
+    "OK": "OK",
+    "Cancel": "Cancel",
+    "CooldownWarning": "Please wait {seconds}s before sending another sticker.",
+
+    "Settings": {
+      "StickerPacks": "Sticker Packs",
+      "StickerPacksHint": "Sticker pack data (managed automatically).",
+      "ShowOnCanvas": "Show Stickers on Canvas",
+      "ShowOnCanvasHint": "When a sticker is sent in chat, also display it on the game canvas with a pop-in/fade-out animation.",
+      "CanvasDuration": "Canvas Display Duration (seconds)",
+      "CanvasDurationHint": "How long stickers remain visible on the canvas before fading out.",
+      "StickerSize": "Sticker Size (px)",
+      "StickerSizeHint": "The display size for stickers in chat and on the canvas.",
+      "StickerCooldown": "Sticker Cooldown (seconds)",
+      "StickerCooldownHint": "Minimum time between sending stickers to prevent spam. Set to 0 to disable.",
+      "ManagePacks": "Manage Sticker Packs",
+      "ManagePacksLabel": "Open Manager",
+      "ManagePacksHint": "Upload, organize, and delete sticker packs."
+    },
+
+    "PackManager": {
+      "Title": "Sticker Pack Manager",
+      "Description": "Create sticker packs and upload images. Supported formats: PNG, WebP, GIF, JPEG, AVIF.",
+      "NewPack": "New Pack",
+      "NewPackTitle": "Create Sticker Pack",
+      "NewPackPrompt": "Pack name:",
+      "InvalidName": "Invalid pack name. Use only letters, numbers, and hyphens.",
+      "PackExists": "A pack with that name already exists.",
+      "PackCreated": "Sticker pack \"{name}\" created.",
+      "PackDeleted": "Sticker pack \"{name}\" deleted.",
+      "DeletePackTitle": "Delete Sticker Pack",
+      "DeletePackConfirm": "<p>Are you sure you want to delete the sticker pack <strong>{name}</strong>?</p><p>This will remove the pack configuration. Uploaded files will remain on the server.</p>",
+      "AddStickers": "Add Stickers",
+      "DeletePack": "Delete Pack",
+      "DeleteSticker": "Remove Sticker",
+      "TogglePack": "Expand/Collapse",
+      "StickersUploaded": "{count} sticker(s) uploaded.",
+      "EmptyPack": "No stickers yet. Click the upload button to add some!",
+      "NoPacks": "No sticker packs configured. Click \"New Pack\" to get started."
+    },
+
+    "Picker": {
+      "ButtonTitle": "Send a Sticker",
+      "Search": "Search stickers...",
+      "NoPacks": "No sticker packs available. Ask your GM to add some in Module Settings."
+    }
+  }
+}
