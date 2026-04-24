@@ -2,7 +2,7 @@
   "id": "wpp-stickers",
   "title": "WhatsApp Stickers",
   "description": "Upload WhatsApp sticker packs (or any sticker bundle) and use them in Foundry VTT chat. Stickers can also pop up on the game canvas with a fade-out effect.",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "compatibility": {
     "minimum": "12",
     "verified": "14"
@@ -15,7 +15,7 @@
   ],
   "url": "https://github.com/GonzaloAyala/foundryvtt-wpp-stickers",
   "manifest": "https://github.com/GonzaloAyala/foundryvtt-wpp-stickers/releases/latest/download/module.json",
-  "download": "https://github.com/GonzaloAyala/foundryvtt-wpp-stickers/releases/download/v1.0.8/wpp-stickers-v1.0.8.zip",
+  "download": "https://github.com/GonzaloAyala/foundryvtt-wpp-stickers/releases/download/v1.1.0/wpp-stickers-v1.1.0.zip",
   "license": "LICENSE",
   "esmodules": [
     "scripts/wpp-stickers.mjs"

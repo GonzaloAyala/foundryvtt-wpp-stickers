@@ -3,7 +3,7 @@
 A Foundry Virtual Tabletop module that lets you upload sticker packs (WhatsApp-style or any image collection) and send them in chat. Stickers also pop up on the game canvas with a fun animation before fading away.
 
 ![Foundry VTT Version](https://img.shields.io/badge/Foundry_VTT-v12--v14-green)
-![Module Version](https://img.shields.io/badge/version-1.0.8-blue)
+![Module Version](https://img.shields.io/badge/version-1.1.0-blue)
 
 ## Features
 
