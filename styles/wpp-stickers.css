@@ -163,49 +163,6 @@ menu .wpp-sticker-button {
   box-shadow: none !important;
 }
 
-/* ---- Canvas Overlay ---- */
-
-#wpp-canvas-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 70;
-  overflow: hidden;
-}
-
-.wpp-canvas-sticker {
-  position: absolute;
-  animation: wpp-sticker-pop-fade var(--duration, 4s) ease-in-out forwards;
-  pointer-events: none;
-}
-
-.wpp-canvas-sticker img {
-  object-fit: contain;
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
-}
-
-@keyframes wpp-sticker-pop-fade {
-  0% {
-    opacity: 0;
-    transform: scale(0.3);
-  }
-  10% {
-    opacity: 1;
-    transform: scale(1.1);
-  }
-  15% {
-    transform: scale(1);
-  }
-  70% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(0.8) translateY(-20px);
-  }
-}
-
 /* ---- Pack Manager ---- */
 
 .wpp-stickers.pack-manager .notes {

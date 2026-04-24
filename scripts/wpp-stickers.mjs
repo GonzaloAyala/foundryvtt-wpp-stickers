@@ -381,9 +381,11 @@ class CanvasStickerOverlay {
 
   init() {
     if (this.container) return;
-    this.container = document.createElement("div");
-    this.container.id = "wpp-canvas-overlay";
-    document.getElementById("board")?.parentElement?.appendChild(this.container);
+    if (!canvas?.interface) return;
+    this.container = new PIXI.Container();
+    this.container.name = "wpp-stickers";
+    this.container.eventMode = "none";
+    canvas.interface.addChild(this.container);
   }
 
   /**
@@ -391,61 +393,90 @@ class CanvasStickerOverlay {
    * @param {string} name        Sticker display name
    * @param {object} [speaker]   Speaker data with optional token/scene ids
    */
-  show(path, name, speaker = {}) {
+  async show(path, name, speaker = {}) {
     if (!game.settings.get(MODULE_ID, "showOnCanvas")) return;
+    if (!canvas?.ready) return;
     this.init();
     if (!this.container) return;
 
     const size = game.settings.get(MODULE_ID, "stickerSize");
     const duration = game.settings.get(MODULE_ID, "canvasDuration");
 
-    const wrapper = document.createElement("div");
-    wrapper.classList.add("wpp-canvas-sticker");
-    wrapper.style.setProperty("--duration", `${duration}s`);
-
-    let x, y;
+    // Resolve anchor position in world coordinates
     const token = speaker?.token ? canvas.tokens?.get(speaker.token) : null;
+    let worldX, worldY;
 
-    if (token && canvas.stage) {
-      // Convert token center from canvas world coords to screen coords
+    if (token) {
       const center = token.center;
-      const t = canvas.stage.worldTransform;
-      const screenX = (t.a * center.x) + (t.c * center.y) + t.tx;
-      const screenY = (t.b * center.x) + (t.d * center.y) + t.ty;
-
-      // Adjust relative to the overlay container
-      const rect = this.container.getBoundingClientRect();
-      // Place sticker above the token with a small random horizontal jitter
-      const jitter = (Math.random() - 0.5) * size * 0.4;
-      x = screenX - rect.left - (size / 2) + jitter;
-      y = screenY - rect.top - size - 10;
+      const jitter = (Math.random() - 0.5) * size * 0.3;
+      worldX = center.x + jitter;
+      worldY = center.y - (token.h * 0.5) - (size * 0.6);
     } else {
-      // Fallback: random center-biased position
-      const maxX = this.container.clientWidth - size;
-      const maxY = this.container.clientHeight - size;
-      x = Math.max(0, Math.min(maxX, (maxX * 0.5) + (Math.random() - 0.5) * maxX * 0.6));
-      y = Math.max(0, Math.min(maxY, (maxY * 0.5) + (Math.random() - 0.5) * maxY * 0.6));
+      // Fallback: center of the current viewport
+      const view = canvas.scene.dimensions ?? canvas.dimensions;
+      worldX = view.sceneX + view.sceneWidth * (0.4 + Math.random() * 0.2);
+      worldY = view.sceneY + view.sceneHeight * (0.4 + Math.random() * 0.2);
     }
 
-    // Clamp to container bounds
-    x = Math.max(0, Math.min(this.container.clientWidth - size, x));
-    y = Math.max(0, Math.min(this.container.clientHeight - size, y));
+    // Load the texture and create the sprite
+    const texture = await loadTexture(path);
+    if (!texture || !this.container) return;
 
-    wrapper.style.left = `${x}px`;
-    wrapper.style.top = `${y}px`;
+    const sprite = new PIXI.Sprite(texture);
+    sprite.anchor.set(0.5, 1.0);
+    sprite.x = worldX;
+    sprite.y = worldY;
+    sprite.alpha = 0;
 
-    const img = document.createElement("img");
-    img.src = path;
-    img.alt = name;
-    img.style.width = `${size}px`;
-    img.style.height = `${size}px`;
-    wrapper.appendChild(img);
+    // Pre-compute the base scale so the sprite displays at `size` px
+    const baseScaleX = size / texture.width;
+    const baseScaleY = size / texture.height;
+    sprite.scale.set(baseScaleX * 0.3, baseScaleY * 0.3);
 
-    this.container.appendChild(wrapper);
+    this.container.addChild(sprite);
 
-    // Remove after animation completes
+    // Animate: pop in → hold → fade out
     const totalMs = duration * 1000;
-    setTimeout(() => wrapper.remove(), totalMs + 500);
+    const startTime = performance.now();
+    const ticker = canvas.app.ticker;
+
+    const animate = () => {
+      const elapsed = performance.now() - startTime;
+      const t = Math.min(elapsed / totalMs, 1.0);
+
+      if (t <= 0.10) {
+        // 0% → 10%: fade in + overshoot scale
+        const p = t / 0.10;
+        sprite.alpha = p;
+        const s = 0.3 + p * 0.8; // 0.3 → 1.1
+        sprite.scale.set(baseScaleX * s, baseScaleY * s);
+      } else if (t <= 0.15) {
+        // 10% → 15%: settle to scale 1
+        const p = (t - 0.10) / 0.05;
+        sprite.alpha = 1;
+        const s = 1.1 - p * 0.1; // 1.1 → 1.0
+        sprite.scale.set(baseScaleX * s, baseScaleY * s);
+      } else if (t <= 0.70) {
+        // 15% → 70%: hold
+        sprite.alpha = 1;
+        sprite.scale.set(baseScaleX, baseScaleY);
+      } else {
+        // 70% → 100%: fade out + shrink + drift up
+        const p = (t - 0.70) / 0.30;
+        sprite.alpha = 1 - p;
+        const s = 1 - p * 0.2; // 1.0 → 0.8
+        sprite.scale.set(baseScaleX * s, baseScaleY * s);
+        sprite.y = worldY - p * 20;
+      }
+
+      if (t >= 1.0) {
+        ticker.remove(animate);
+        this.container.removeChild(sprite);
+        sprite.destroy();
+      }
+    };
+
+    ticker.add(animate);
   }
 }
 
@@ -539,6 +570,16 @@ Hooks.once("ready", () => {
       canvasOverlay.show(data.path, data.name, data.speaker);
     }
   });
+});
+
+/**
+ * Re-attach the PIXI container when the canvas is rebuilt (e.g. scene change).
+ */
+Hooks.on("canvasReady", () => {
+  if (canvasOverlay) {
+    canvasOverlay.container = null;
+    canvasOverlay.init();
+  }
 });
 
 /**
