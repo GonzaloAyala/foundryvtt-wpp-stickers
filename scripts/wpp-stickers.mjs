@@ -428,10 +428,9 @@ class CanvasStickerOverlay {
     sprite.y = worldY;
     sprite.alpha = 0;
 
-    // Pre-compute the base scale so the sprite displays at `size` px
-    const baseScaleX = size / texture.width;
-    const baseScaleY = size / texture.height;
-    sprite.scale.set(baseScaleX * 0.3, baseScaleY * 0.3);
+    // Pre-compute a uniform scale so the sprite fits within `size` px preserving aspect ratio
+    const baseScale = Math.min(size / texture.width, size / texture.height);
+    sprite.scale.set(baseScale * 0.3, baseScale * 0.3);
 
     this.container.addChild(sprite);
 
@@ -449,23 +448,23 @@ class CanvasStickerOverlay {
         const p = t / 0.10;
         sprite.alpha = p;
         const s = 0.3 + p * 0.8; // 0.3 → 1.1
-        sprite.scale.set(baseScaleX * s, baseScaleY * s);
+        sprite.scale.set(baseScale * s);
       } else if (t <= 0.15) {
         // 10% → 15%: settle to scale 1
         const p = (t - 0.10) / 0.05;
         sprite.alpha = 1;
         const s = 1.1 - p * 0.1; // 1.1 → 1.0
-        sprite.scale.set(baseScaleX * s, baseScaleY * s);
+        sprite.scale.set(baseScale * s);
       } else if (t <= 0.70) {
         // 15% → 70%: hold
         sprite.alpha = 1;
-        sprite.scale.set(baseScaleX, baseScaleY);
+        sprite.scale.set(baseScale);
       } else {
         // 70% → 100%: fade out + shrink + drift up
         const p = (t - 0.70) / 0.30;
         sprite.alpha = 1 - p;
         const s = 1 - p * 0.2; // 1.0 → 0.8
-        sprite.scale.set(baseScaleX * s, baseScaleY * s);
+        sprite.scale.set(baseScale * s);
         sprite.y = worldY - p * 20;
       }
 
