@@ -1,0 +1,52 @@
+name: Release Module
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update module.json with release URLs
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          jq \
+            --arg ver "$VERSION" \
+            --arg dl "https://github.com/${REPO}/releases/download/${TAG}/wpp-stickers-${TAG}.zip" \
+            '.version = $ver | .download = $dl' \
+            module.json > module.tmp.json
+          mv module.tmp.json module.json
+
+      - name: Build release zip
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          mkdir -p wpp-stickers
+          cp -r module.json scripts styles templates lang LICENSE README.md wpp-stickers/
+          zip -r "wpp-stickers-${TAG}.zip" wpp-stickers/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.version.outputs.tag }}
+          files: |
+            wpp-stickers-${{ steps.version.outputs.tag }}.zip
+            module.json
+          generate_release_notes: true
