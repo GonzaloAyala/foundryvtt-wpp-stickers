@@ -33,7 +33,7 @@ A Foundry Virtual Tabletop module that lets you upload sticker packs (WhatsApp-s
 ### Manifest URL (if hosting the manifest)
 
 ```
-https://your-host.com/path/to/module.json
+https://github.com/GonzaloAyala/foundryvtt-wpp-stickers/releases/latest/download/module.json
 ```
 
 ## How to Use
