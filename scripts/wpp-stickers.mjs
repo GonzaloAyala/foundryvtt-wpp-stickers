@@ -562,13 +562,6 @@ Hooks.once("ready", () => {
   console.log(`${MODULE_ID} | Module ready`);
   stickerPicker = new StickerPicker();
   canvasOverlay = new CanvasStickerOverlay();
-
-  // Listen for sticker events from other clients
-  game.socket.on(`module.${MODULE_ID}`, (data) => {
-    if (data.action === "showSticker") {
-      canvasOverlay.show(data.path, data.name, data.speaker);
-    }
-  });
 });
 
 /**
@@ -633,16 +626,6 @@ Hooks.on("createChatMessage", (message) => {
 
   // Show on local canvas, positioned over the speaker's token
   canvasOverlay?.show(flags.stickerPath, flags.stickerName, speaker);
-
-  // Broadcast to other clients (only from the sender)
-  if (message.author?.id === game.user.id) {
-    game.socket.emit(`module.${MODULE_ID}`, {
-      action: "showSticker",
-      path: flags.stickerPath,
-      name: flags.stickerName,
-      speaker: { token: speaker.token, scene: speaker.scene }
-    });
-  }
 });
 
 /**
